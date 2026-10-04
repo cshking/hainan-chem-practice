@@ -1,0 +1,226 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>海南高考化学真题在线练习平台</title>
+  <style>
+    :root {
+      --bg: #f4f6fb;
+      --card: #ffffff;
+      --text: #1f2937;
+      --muted: #6b7280;
+      --line: #e5e7eb;
+      --primary: #2563eb;
+      --primary-dark: #1d4ed8;
+      --correct-bg: #dcfce7;
+      --correct-bd: #16a34a;
+      --correct-tx: #15803d;
+      --wrong-bg: #fee2e2;
+      --wrong-bd: #dc2626;
+      --wrong-tx: #b91c1c;
+      --tag-single: #2563eb;
+      --tag-multiple: #7c3aed;
+      --tag-converted: #d97706;
+      --hint-bg: #eff6ff;
+      --hint-bd: #93c5fd;
+      --hint-tx: #1e40af;
+      --shadow: 0 1px 3px rgba(0,0,0,.08), 0 4px 12px rgba(0,0,0,.04);
+    }
+    * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+    html, body { margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.6;
+      font-size: 16px;
+    }
+    .wrap { max-width: 820px; margin: 0 auto; padding: 16px 14px 120px; }
+
+    /* 顶部标题 + 实时成绩条 */
+    header {
+      position: sticky; top: 0; z-index: 30;
+      background: rgba(244,246,251,.92);
+      backdrop-filter: blur(8px);
+      padding: 12px 0 10px;
+      border-bottom: 1px solid var(--line);
+      margin-bottom: 14px;
+    }
+    .title { font-size: 20px; font-weight: 700; margin: 0 0 8px; }
+    .title small { font-size: 12px; color: var(--muted); font-weight: 400; display: block; margin-top: 2px; }
+    .stats {
+      display: flex; gap: 10px; flex-wrap: wrap; align-items: center;
+    }
+    .stat {
+      background: var(--card); border: 1px solid var(--line); border-radius: 10px;
+      padding: 6px 12px; font-size: 13px; box-shadow: var(--shadow);
+    }
+    .stat b { font-size: 16px; color: var(--primary); }
+
+    /* 筛选 + 重练 */
+    .controls {
+      display: flex; gap: 10px; flex-wrap: wrap; align-items: center;
+      margin-bottom: 14px;
+    }
+    .controls label { font-size: 13px; color: var(--muted); display: flex; flex-direction: column; gap: 3px; }
+    select, .btn {
+      font-size: 15px; padding: 9px 12px; border-radius: 10px;
+      border: 1px solid var(--line); background: var(--card); color: var(--text);
+      min-height: 44px; cursor: pointer;
+    }
+    select { min-width: 130px; }
+    .btn-primary {
+      background: var(--primary); color: #fff; border-color: var(--primary);
+      font-weight: 600; margin-left: auto;
+    }
+    .btn-primary:active { background: var(--primary-dark); }
+
+    /* 提示横幅 */
+    .banner {
+      background: #fffbeb; border: 1px solid #fde68a; color: #92400e;
+      border-radius: 10px; padding: 8px 12px; font-size: 13px; margin-bottom: 14px;
+    }
+
+    /* 题目卡片 */
+    .q-card {
+      background: var(--card); border: 1px solid var(--line); border-radius: 14px;
+      padding: 16px; margin-bottom: 14px; box-shadow: var(--shadow);
+    }
+    .q-head { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; flex-wrap: wrap; }
+    .q-no {
+      background: var(--primary); color: #fff; font-weight: 700; font-size: 14px;
+      width: 30px; height: 30px; border-radius: 8px; display: flex;
+      align-items: center; justify-content: center; flex-shrink: 0;
+    }
+    .q-paper { font-size: 13px; color: var(--muted); }
+    .tag {
+      font-size: 12px; padding: 2px 9px; border-radius: 999px; color: #fff; font-weight: 600;
+    }
+    .tag-single { background: var(--tag-single); }
+    .tag-multiple { background: var(--tag-multiple); }
+    .tag-converted { background: var(--tag-converted); }
+    .q-stem { font-size: 16px; margin: 4px 0 12px; }
+
+    .options { display: flex; flex-direction: column; gap: 10px; }
+    .opt {
+      display: flex; align-items: center; gap: 10px;
+      border: 1.5px solid var(--line); border-radius: 10px;
+      padding: 12px 14px; min-height: 52px; cursor: pointer;
+      background: #fff; transition: background .15s, border-color .15s;
+      font-size: 15.5px; user-select: none;
+    }
+    .opt:hover { border-color: #c7d2fe; background: #f8faff; }
+    .opt .letter {
+      width: 26px; height: 26px; flex-shrink: 0; border-radius: 50%;
+      border: 1.5px solid var(--line); display: flex; align-items: center;
+      justify-content: center; font-weight: 700; font-size: 14px; color: var(--muted);
+    }
+    .opt.sel-pending { border-color: var(--primary); background: #eff6ff; }
+    .opt.sel-pending .letter { border-color: var(--primary); color: var(--primary); }
+    .opt.correct { background: var(--correct-bg); border-color: var(--correct-bd); color: var(--correct-tx); }
+    .opt.correct .letter { border-color: var(--correct-bd); color: var(--correct-tx); background: #fff; }
+    .opt.wrong { background: var(--wrong-bg); border-color: var(--wrong-bd); color: var(--wrong-tx); }
+    .opt.wrong .letter { border-color: var(--wrong-bd); color: var(--wrong-tx); background: #fff; }
+
+    .submit-row { margin-top: 12px; }
+    .btn-submit {
+      background: var(--tag-multiple); color: #fff; border: none; font-weight: 600;
+      padding: 11px 20px; border-radius: 10px; min-height: 44px; cursor: pointer; font-size: 15px;
+    }
+    .btn-submit:disabled { background: #c4b5fd; cursor: not-allowed; }
+
+    .feedback {
+      margin-top: 12px; border-radius: 10px; padding: 10px 14px; font-size: 14.5px;
+    }
+    .feedback.ok { background: var(--correct-bg); color: var(--correct-tx); border: 1px solid var(--correct-bd); }
+    .feedback.no { background: #fff7ed; color: #9a3412; border: 1px solid #fdba74; }
+    .feedback .hd { font-weight: 700; margin-bottom: 4px; }
+    .hint {
+      margin-top: 8px; background: var(--hint-bg); border: 1px solid var(--hint-bd);
+      color: var(--hint-tx); border-radius: 8px; padding: 9px 12px; font-size: 14px; line-height: 1.7;
+    }
+    .hint .lab { font-weight: 700; }
+
+    /* 完成汇总 */
+    .result {
+      position: fixed; left: 0; right: 0; bottom: 0; z-index: 40;
+      background: #fff; border-top: 1px solid var(--line);
+      box-shadow: 0 -4px 16px rgba(0,0,0,.08);
+      padding: 14px 16px calc(14px + env(safe-area-inset-bottom));
+      display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+    }
+    .result .score { font-size: 15px; }
+    .result .score b { font-size: 22px; color: var(--primary); }
+    .result .btn-primary { margin-left: auto; }
+    .result.hidden { display: none; }
+
+    .empty { text-align: center; color: var(--muted); padding: 40px 0; }
+
+    @media (max-width: 600px) {
+      .wrap { padding: 12px 10px 130px; }
+      .title { font-size: 18px; }
+      .q-stem { font-size: 15.5px; }
+      .opt { font-size: 15px; padding: 11px 12px; }
+      .stat { padding: 5px 10px; font-size: 12px; }
+      select, .btn { font-size: 14px; padding: 8px 10px; }
+      .controls label { width: 100%; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="wrap" style="padding-bottom:0;margin-bottom:0">
+      <h1 class="title">海南高考化学真题在线练习平台
+        <small>新高考 · 选择性考试 · 单选 / 不定项 / 填空题转化题 · 每题附解题提示</small>
+      </h1>
+      <div class="stats">
+        <div class="stat">已答 <b id="st-answered">0</b> / <span id="st-total">0</span></div>
+        <div class="stat">答对 <b id="st-correct">0</b></div>
+        <div class="stat">正确率 <b id="st-acc">—</b></div>
+      </div>
+    </div>
+  </header>
+
+  <div class="wrap">
+    <div class="banner" id="banner">
+      📘 <strong>使用说明：</strong>本平台汇总了你提供的 7 份网络下载练习卷，按「年份 → 真题1 / 真题2 …」组织，下拉菜单切换练习。
+      每题作答后立即判分，并<strong>始终给出详细解题提示</strong>（知识点 + 对错分析 + 易错点），帮助你真正学懂。
+      注意：这些均为网络搜集的练习资料，<strong>非官方真题</strong>，个别题目/答案可能存在瑕疵，请以教材和官方为准。
+    </div>
+
+    <div class="controls">
+      <label>练习试卷
+        <select id="filter-paper"></select>
+      </label>
+      <label>题型
+        <select id="filter-type">
+          <option value="all">全部题型</option>
+          <option value="single">单选题</option>
+          <option value="multiple">不定项选择题</option>
+          <option value="converted">原为填空题</option>
+        </select>
+      </label>
+      <button class="btn btn-primary" id="btn-reset">一键重练</button>
+    </div>
+
+    <div id="questions"></div>
+    <div class="empty hidden" id="empty">该筛选条件下暂无题目。</div>
+  </div>
+
+  <div class="result hidden" id="result">
+    <div class="score">本卷练习完成！得分 <b id="r-score">0</b> / <span id="r-total">0</span>，正确率 <b id="r-acc">0%</b></div>
+    <button class="btn btn-primary" id="btn-reset2">重新练习</button>
+  </div>
+
+  <!-- 各试卷数据（按年份→真题N 组织，独立文件便于增删） -->
+  <script src="data/paper_2024_A.js"></script>
+  <script src="data/paper_2024_B.js"></script>
+  <script src="data/paper_2025_A.js"></script>
+  <script src="data/paper_2025_B.js"></script>
+  <script src="data/paper_2025_C.js"></script>
+  <script src="data/paper_2026_A.js"></script>
+  <script src="data/paper_2026_B.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
