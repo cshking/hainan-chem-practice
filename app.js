@@ -1,8 +1,14 @@
 /* ============================================================================
- *  海南高考化学真题在线练习平台 —— 交互逻辑
+ *  海南高考化学真题精练 · 学懂弄通版 —— 交互逻辑
  *  依赖：各 data/paper_*.js 向全局 window.PAPERS 注入试卷对象
  *  试卷对象：{ id, year, version, source, single[], multiple[], converted[] }
- *  题目对象：{ id, stem, options[4], answer(数字或数组), hint, originalType? }
+ *  题目对象：{ id, stem, options[4], answer(数字或数组), hint, knowledgePoint, originalType? }
+ *
+ *  老师的学习法：
+ *   1) 每题拆解到纳米知识点（knowledgePoint + hint）
+ *   2) 做错 → 明确“你错在哪里” + “需重点领悟的知识点”
+ *   3) 做错 → 必须用自己的话“重述知识点”（重述框，≥MIN_RESTATE 字）
+ *   4) 整套题有错就必须“重新做一遍”，直到本轮全部正确方可过关
  * ========================================================================== */
 (function () {
   "use strict";
@@ -11,11 +17,14 @@
   var TYPE_ORDER = ["single", "multiple", "converted"];
   var TYPE_LABEL = { single: "单选题", multiple: "不定项选择题", converted: "原为填空题" };
   var LETTERS = ["A", "B", "C", "D"];
+  var MIN_RESTATE = 15; // 重述知识点最少字数
 
-  // 每道题作答状态：{ qid, paperId, year, version, type, q, selected[], submitted, status }
+  // 每道题作答状态：{ qid, paperId, year, version, type, q, selected[], submitted, status, restated }
   var state = {};
   var currentPaperId = PAPERS.length ? PAPERS[0].id : null;
   var filterType = "all";
+  var round = 1;                 // 当前练习轮次
+  var everWrong = {};            // qid -> true：本套练习中曾答错（用于“易错”标记）
 
   var $ = function (id) { return document.getElementById(id); };
   var elPaper = $("filter-paper");
@@ -23,6 +32,8 @@
   var elQuestions = $("questions");
   var elEmpty = $("empty");
   var elResult = $("result");
+  var elRound = $("st-round");
+  var elFlaw = $("st-flaw");
 
   // ---- 数据扁平化（仅当前试卷）----
   function flatten() {
@@ -33,7 +44,7 @@
       (paper[t] || []).forEach(function (q) {
         var rec = state[q.id] || {
           qid: q.id, paperId: paper.id, year: paper.year, version: paper.version,
-          type: t, q: q, selected: [], submitted: false, status: "unanswered"
+          type: t, q: q, selected: [], submitted: false, status: "unanswered", restated: ""
         };
         rec.paperId = paper.id; rec.year = paper.year; rec.version = paper.version;
         rec.type = t; rec.q = q;
@@ -44,16 +55,12 @@
     return list;
   }
 
-  function getFiltered() {
-    return flatten().filter(function (r) {
-      if (filterType !== "all" && r.type !== filterType) return false;
-      return true;
-    });
-  }
-
   // ---- 渲染 ----
   function render() {
-    var list = getFiltered();
+    var all = flatten();
+    var list = all.filter(function (r) {
+      return filterType === "all" || r.type === filterType;
+    });
     elQuestions.innerHTML = "";
 
     if (list.length === 0) {
@@ -66,7 +73,7 @@
       elQuestions.appendChild(buildCard(rec, idx + 1));
     });
 
-    updateStats(list);
+    updateStats(all); // 成绩与“过关/重做”判定始终基于整套题，与筛选无关
   }
 
   function buildCard(rec, no) {
@@ -74,14 +81,16 @@
     card.className = "q-card";
     card.setAttribute("data-qid", rec.qid);
 
-    // 头部：题号 + 试卷(年份·真题N) + 题型标签
+    // 头部：题号 + 试卷(年份·真题N) + 题型标签 + （曾错）易错标签
     var paperLabel = rec.year + " 年 · " + rec.version;
     var head = document.createElement("div");
     head.className = "q-head";
-    head.innerHTML =
+    var headHtml =
       '<div class="q-no">' + no + '</div>' +
       '<span class="q-paper">' + paperLabel + '</span>' +
       '<span class="tag tag-' + rec.type + '">' + TYPE_LABEL[rec.type] + '</span>';
+    if (everWrong[rec.qid]) headHtml += '<span class="tag tag-flaw">⚠ 易错</span>';
+    head.innerHTML = headHtml;
     card.appendChild(head);
 
     // 题干
@@ -118,7 +127,7 @@
       card.appendChild(row);
     }
 
-    // 反馈区（含解题提示）
+    // 反馈区（含知识点拆解 / 错因 / 重述框）
     var fb = document.createElement("div");
     fb.className = "feedback";
     if (rec.submitted) {
@@ -149,27 +158,74 @@
     }
   }
 
+  function restateOk(rec) {
+    return !!(rec.restated && rec.restated.trim().length >= MIN_RESTATE);
+  }
+
   function buildFeedback(rec) {
     var box = document.createElement("div");
+    var kp = rec.q.knowledgePoint || "（见下方拆解讲解）";
+
     if (rec.status === "correct") {
       box.className = "feedback ok";
-      box.innerHTML = '<div class="hd">✓ 回答正确</div>';
+      box.innerHTML = '<div class="hd">✓ 回答正确，已掌握该知识点</div>';
+      var k1 = document.createElement("div");
+      k1.className = "kp";
+      k1.innerHTML = '<span class="lab">📌 本题知识点：</span>' + escapeHtml(kp);
+      box.appendChild(k1);
+      var h1 = document.createElement("div");
+      h1.className = "hint";
+      h1.innerHTML = '<span class="lab">💡 拆解讲解：</span>' + escapeHtml(rec.q.hint || "（暂无讲解）");
+      box.appendChild(h1);
     } else {
       box.className = "feedback no";
-      var combo = "";
+      var selLetters = rec.selected.slice().sort(function (a, b) { return a - b; })
+        .map(function (i) { return LETTERS[i]; }).join("、");
+      var ansArr = (Array.isArray(rec.q.answer) ? rec.q.answer : [rec.q.answer])
+        .slice().sort(function (a, b) { return a - b; })
+        .map(function (i) { return LETTERS[i]; }).join("、");
+
+      var err = document.createElement("div");
+      err.className = "err";
       if (rec.type === "multiple") {
-        var letters = rec.q.answer.slice().sort().map(function (x) { return LETTERS[x]; }).join("、");
-        combo = '<div class="hd">✗ 回答错误　正确组合：' + letters + '</div>';
+        err.innerHTML = '<span class="lab">🔍 你错在哪里：</span>你选了 <b>' + selLetters +
+          '</b>，正确组合应为 <b>' + ansArr + '</b>。' +
+          (selLetters !== ansArr ? '存在漏选或错选——未选中的正确项同样要掌握，错选的项要弄清为何不对。' : '') +
+          '请结合下方拆解逐选项分析。';
       } else {
-        combo = '<div class="hd">✗ 回答错误　正确答案：' + LETTERS[rec.q.answer] + '</div>';
+        err.innerHTML = '<span class="lab">🔍 你错在哪里：</span>你选择了 <b>' + selLetters +
+          '</b>，但正确答案是 <b>' + ansArr + '</b>。你选的选项不符合题意，原因见下方拆解；请重点领悟上方知识点。';
       }
-      box.innerHTML = combo;
+      box.appendChild(err);
+
+      var k2 = document.createElement("div");
+      k2.className = "kp";
+      k2.innerHTML = '<span class="lab">🎯 需重点领悟的知识点：</span>' + escapeHtml(kp);
+      box.appendChild(k2);
+
+      var h2 = document.createElement("div");
+      h2.className = "hint";
+      h2.innerHTML = '<span class="lab">💡 拆解讲解：</span>' + escapeHtml(rec.q.hint || "（暂无讲解）");
+      box.appendChild(h2);
+
+      // 重述知识点区（做错必做）
+      var rs = document.createElement("div");
+      rs.className = "restate";
+      rs.innerHTML = '<div class="rs-lab">✍️ 错题为师：请用你自己的话写出这道题目的知识点（≥' +
+        MIN_RESTATE + ' 字），写完才算真正弄懂：</div>';
+      var ta = document.createElement("textarea");
+      ta.className = "rs-ta";
+      ta.setAttribute("data-qid", rec.qid);
+      ta.placeholder = "例如：勒夏特列原理——增大压强，平衡向气体分子数减少的方向移动……";
+      ta.value = rec.restated || "";
+      rs.appendChild(ta);
+      var ind = document.createElement("div");
+      ind.className = "rs-ind";
+      ind.setAttribute("data-ind", rec.qid);
+      ind.textContent = restateOk(rec) ? "✓ 已重述，知识点已记录" : "";
+      rs.appendChild(ind);
+      box.appendChild(rs);
     }
-    // 解题提示：无论对错都给出，帮助学懂弄通
-    var hint = document.createElement("div");
-    hint.className = "hint";
-    hint.innerHTML = '<span class="lab">💡 解题提示：</span>' + escapeHtml(rec.q.hint || "（暂无提示）");
-    box.appendChild(hint);
     return box;
   }
 
@@ -180,7 +236,7 @@
   }
 
   // ---- 交互 ----
-  elQuestions.addEventListener("click", function (e) {
+  function onCardClick(e) {
     var optEl = e.target.closest ? e.target.closest(".opt") : null;
     if (!optEl) return;
     var card = optEl.closest(".q-card");
@@ -200,7 +256,26 @@
       judge(rec);
       render();
     }
-  });
+  }
+
+  function onRestateInput(e) {
+    if (!(e.target.classList && e.target.classList.contains("rs-ta"))) return;
+    var qid = e.target.getAttribute("data-qid");
+    var rec = state[qid];
+    if (!rec) return;
+    rec.restated = e.target.value;
+    var ind = elQuestions.querySelector('.rs-ind[data-ind="' + qid + '"]');
+    if (ind) ind.textContent = restateOk(rec) ? "✓ 已重述，知识点已记录" : "";
+    renderResultPanel(flatten()); // 实时更新底部“是否可进入下一轮”
+  }
+
+  function onResultClick(e) {
+    var b = e.target.closest ? e.target.closest("[data-act]") : null;
+    if (!b) return;
+    var act = b.getAttribute("data-act");
+    if (act === "redo") doRedo();
+    else if (act === "finish") resetCurrentPaper();
+  }
 
   function submitMultiple(qid) {
     var rec = state[qid];
@@ -217,9 +292,10 @@
     var isCorrect = sel.length === ans.length && sel.every(function (v, i) { return v === ans[i]; });
     rec.status = isCorrect ? "correct" : "wrong";
     rec.submitted = true;
+    if (!isCorrect) everWrong[rec.qid] = true;
   }
 
-  // ---- 统计与完成 ----
+  // ---- 统计与“过关 / 重做”闭环 ----
   function updateStats(list) {
     var total = list.length;
     var answered = 0, correct = 0;
@@ -230,26 +306,81 @@
     $("st-answered").textContent = answered;
     $("st-correct").textContent = correct;
     $("st-acc").textContent = answered > 0 ? Math.round((correct / answered) * 100) + "%" : "—";
+    elRound.textContent = round;
+    var flaw = 0;
+    Object.keys(everWrong).forEach(function (k) {
+      if (state[k] && state[k].paperId === currentPaperId) flaw++;
+    });
+    elFlaw.textContent = flaw;
 
-    if (total > 0 && answered === total) {
-      $("r-score").textContent = correct;
-      $("r-total").textContent = total;
-      $("r-acc").textContent = Math.round((correct / total) * 100) + "%";
-      elResult.classList.remove("hidden");
+    renderResultPanel(list);
+  }
+
+  function renderResultPanel(list) {
+    var total = list.length;
+    var answered = list.filter(function (r) { return r.submitted; }).length;
+    var correct = list.filter(function (r) { return r.status === "correct"; }).length;
+    var wrong = list.filter(function (r) { return r.submitted && r.status === "wrong"; });
+
+    if (total === 0 || answered < total) {
+      elResult.className = "result hidden";
+      return;
+    }
+    elResult.classList.remove("hidden");
+
+    if (correct === total) {
+      // 通关：本轮全部正确
+      elResult.className = "result win";
+      elResult.innerHTML =
+        '<div class="score">🎉 <b>第 ' + round + ' 轮全部正确！</b> 本套 ' + total +
+        ' 题知识点已真正掌握，可以过关。</div>' +
+        '<button class="btn btn-primary" data-act="finish">再练一次（巩固）</button>';
     } else {
-      elResult.classList.add("hidden");
+      var need = wrong.filter(function (r) { return !restateOk(r); });
+      if (need.length > 0) {
+        // 还有错题没重述知识点 → 先完成重述
+        elResult.className = "result warn";
+        elResult.innerHTML =
+          '<div class="score">✍️ 还有 <b>' + need.length + '</b> 道错题未完成「重述知识点」。' +
+          '请先写完每道错题下方的重述框（≥' + MIN_RESTATE + ' 字），才能进入下一轮重做。</div>';
+      } else {
+        // 错题已重述 → 必须整套重做
+        elResult.className = "result redo";
+        elResult.innerHTML =
+          '<div class="score">⚠️ 本轮有 <b>' + wrong.length + '</b> 题未掌握（知识点已重述）。' +
+          '按老师要求：<b>必须重新做一遍，直到全部正确</b>。</div>' +
+          '<button class="btn btn-primary" data-act="redo">🔄 重新做一遍（第 ' + (round + 1) + ' 轮）</button>';
+      }
     }
   }
 
-  // ---- 重置（仅当前试卷）----
+  // 整套重做（保留“易错”标记，提醒孩子重点）
+  function doRedo() {
+    round++;
+    Object.keys(state).forEach(function (k) {
+      if (state[k].paperId === currentPaperId) {
+        state[k].selected = [];
+        state[k].submitted = false;
+        state[k].status = "unanswered";
+        state[k].restated = "";
+      }
+    });
+    render();
+    window.scrollTo(0, 0);
+  }
+
+  // 一键重练（清本轮：清作答、清重述、清易错、轮次归 1）
   function resetCurrentPaper() {
     Object.keys(state).forEach(function (k) {
       if (state[k].paperId === currentPaperId) {
         state[k].selected = [];
         state[k].submitted = false;
         state[k].status = "unanswered";
+        state[k].restated = "";
       }
     });
+    everWrong = {};
+    round = 1;
     render();
   }
 
@@ -273,11 +404,17 @@
       currentPaperId = elPaper.value;
       filterType = "all";
       elType.value = "all";
+      everWrong = {};
+      round = 1;
       render();
     });
     elType.addEventListener("change", function () { filterType = elType.value; render(); });
     $("btn-reset").addEventListener("click", resetCurrentPaper);
-    $("btn-reset2").addEventListener("click", resetCurrentPaper);
+    $("btn-reset2") && $("btn-reset2").addEventListener("click", resetCurrentPaper);
+
+    elQuestions.addEventListener("click", onCardClick);
+    elQuestions.addEventListener("input", onRestateInput);
+    elResult.addEventListener("click", onResultClick);
 
     render();
   }
